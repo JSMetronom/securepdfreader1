@@ -212,6 +212,62 @@
             -ms-user-select: none;
         }
         
+        /* PDF Password modal */
+        .pdf-password-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .pdf-password-container {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            width: 90%;
+            max-width: 400px;
+            text-align: center;
+        }
+        
+        .pdf-password-container h2 {
+            color: var(--primary);
+            margin-bottom: 1.5rem;
+        }
+        
+        .pdf-password-container p {
+            margin-bottom: 1.5rem;
+            color: #555;
+        }
+        
+        .pdf-password-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid var(--light);
+            border-radius: 4px;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            transition: border-color 0.2s;
+        }
+        
+        .pdf-password-input:focus {
+            border-color: var(--primary);
+            outline: none;
+        }
+        
+        .pdf-error-message {
+            color: #e53935;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            display: none;
+        }
+        
         /* Responsive design */
         @media (max-width: 768px) {
             .pdf-controls {
@@ -255,6 +311,17 @@
             <div class="watermark">GESCHÜTZT</div>
         </div>
     </div>
+    
+    <!-- PDF Password Modal (nur angezeigt, wenn das eingebaute Passwort nicht funktioniert) -->
+    <div class="pdf-password-modal" id="pdf-password-modal">
+        <div class="pdf-password-container">
+            <h2>Passwortgeschützte PDF</h2>
+            <p>Diese PDF-Datei ist passwortgeschützt. Bitte geben Sie das Passwort ein.</p>
+            <input type="password" id="pdf-password-input" class="pdf-password-input" placeholder="PDF-Passwort eingeben">
+            <p id="pdf-error-message" class="pdf-error-message">Falsches Passwort. Bitte versuchen Sie es erneut.</p>
+            <button id="submit-pdf-password" class="btn">Öffnen</button>
+        </div>
+    </div>
 
     <script>
         // Initialize PDF.js
@@ -270,9 +337,16 @@
         const ctx = canvas.getContext('2d');
         const viewer = document.getElementById('pdf-viewer');
         const loadingIndicator = document.querySelector('.loading-indicator');
+        const pdfPasswordModal = document.getElementById('pdf-password-modal');
+        const pdfPasswordInput = document.getElementById('pdf-password-input');
+        const submitPdfPasswordBtn = document.getElementById('submit-pdf-password');
+        const pdfErrorMessage = document.getElementById('pdf-error-message');
         
         // PDF filename - this should be in the same folder as your HTML file when hosted on GitHub Pages
         const pdfUrl = 'document.pdf'; // Replace with your actual PDF filename
+        
+        // Eingebautes Passwort für die PDF
+        const embeddedPassword = "metronomnordlichter2025!";
         
         // Right-click control - currently enabled by default
         let rightClickEnabled = true;
@@ -301,6 +375,89 @@
         function preventRightClick(event) {
             event.preventDefault();
         }
+        
+        // Handle password-protected PDFs
+        function loadPDF(password = null) {
+            // Show loading indicator
+            loadingIndicator.style.display = 'flex';
+            
+            // Options for loading the PDF
+            const loadingOptions = {};
+            if (password) {
+                loadingOptions.password = password;
+            }
+            
+            // Load the PDF
+            pdfjsLib.getDocument({ url: pdfUrl, ...loadingOptions }).promise
+                .then(function(pdfDoc_) {
+                    pdfDoc = pdfDoc_;
+                    document.getElementById('total-pages').textContent = pdfDoc.numPages;
+                    
+                    // Initial render
+                    renderPage(pageNum);
+                    updateButtonStates();
+                    
+                    // Add canvas to viewer
+                    viewer.appendChild(canvas);
+                    
+                    // Hide password modal if it was shown
+                    pdfPasswordModal.style.display = 'none';
+                })
+                .catch(function(error) {
+                    console.error('Error loading PDF:', error);
+                    
+                    // Check if the error is due to password protection
+                    if (error.name === 'PasswordException') {
+                        // If we haven't tried the embedded password yet, try it now
+                        if (!password && error.code === 1) { // PDFJS_NEED_PASSWORD
+                            console.log("PDF ist passwortgeschützt. Versuche mit eingebautem Passwort...");
+                            loadPDF(embeddedPassword);
+                            return;
+                        }
+                        
+                        // If we're here, either:
+                        // 1. We tried with no password, then tried with embedded password and it failed
+                        // 2. User entered a wrong password
+                        
+                        loadingIndicator.style.display = 'none';
+                        
+                        // Show password modal
+                        pdfPasswordModal.style.display = 'flex';
+                        
+                        // If wrong password was entered, show error message
+                        if (password) {
+                            pdfErrorMessage.style.display = 'block';
+                        }
+                        
+                        // Focus on password input
+                        pdfPasswordInput.focus();
+                    } else {
+                        // Other error
+                        loadingIndicator.innerHTML = `
+                            <p>Fehler beim Laden des PDFs.</p>
+                            <p>${error.message}</p>
+                        `;
+                    }
+                });
+        }
+        
+        // Handle PDF password submission
+        submitPdfPasswordBtn.addEventListener('click', function() {
+            const password = pdfPasswordInput.value;
+            if (password) {
+                loadPDF(password);
+            }
+        });
+        
+        // Allow pressing Enter to submit password
+        pdfPasswordInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                const password = pdfPasswordInput.value;
+                if (password) {
+                    loadPDF(password);
+                }
+            }
+        });
         
         // Render the page
         function renderPage(num) {
@@ -391,51 +548,30 @@
             queueRenderPage(pageNum);
         }
         
-        // Load the PDF
-        pdfjsLib.getDocument(pdfUrl).promise.then(function(pdfDoc_) {
-            pdfDoc = pdfDoc_;
-            document.getElementById('total-pages').textContent = pdfDoc.numPages;
-            
-            // Initial render
-            renderPage(pageNum);
-            updateButtonStates();
-            
-            // Add canvas to viewer
-            viewer.appendChild(canvas);
-            
-            // Set up event listeners
-            document.getElementById('prev-page').addEventListener('click', previousPage);
-            document.getElementById('next-page').addEventListener('click', nextPage);
-            document.getElementById('zoom-in').addEventListener('click', zoomIn);
-            document.getElementById('zoom-out').addEventListener('click', zoomOut);
-            
-            // Enable buttons
-            document.getElementById('prev-page').disabled = false;
-            document.getElementById('next-page').disabled = pdfDoc.numPages === 1;
-            
-            // Add keyboard navigation
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'ArrowRight' || e.key === ' ') {
-                    nextPage();
-                } else if (e.key === 'ArrowLeft') {
-                    previousPage();
-                } else if (e.key === '+') {
-                    zoomIn();
-                } else if (e.key === '-') {
-                    zoomOut();
-                }
-            });
-            
-        }).catch(function(error) {
-            console.error('Error loading PDF:', error);
-            loadingIndicator.innerHTML = `
-                <p>Fehler beim Laden des PDFs.</p>
-                <p>${error.message}</p>
-            `;
+        // Set up event listeners
+        document.getElementById('prev-page').addEventListener('click', previousPage);
+        document.getElementById('next-page').addEventListener('click', nextPage);
+        document.getElementById('zoom-in').addEventListener('click', zoomIn);
+        document.getElementById('zoom-out').addEventListener('click', zoomOut);
+        
+        // Add keyboard navigation
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowRight' || e.key === ' ') {
+                nextPage();
+            } else if (e.key === 'ArrowLeft') {
+                previousPage();
+            } else if (e.key === '+') {
+                zoomIn();
+            } else if (e.key === '-') {
+                zoomOut();
+            }
         });
+        
+        // Initial load of the PDF - versucht zuerst ohne Passwort
+        loadPDF();
         
         // To disable right-click, uncomment the following line:
         disableRightClick();
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'955ad50cb1bdd2a0',t:'MTc1MDkyMTI3NC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'955b61880321973a',t:'MTc1MDkyNzAyOC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
